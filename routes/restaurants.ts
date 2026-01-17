@@ -1,7 +1,7 @@
-import { cuisineKey, cuisinesKey, restaurantCuisinesKeyById, restaurantsByRatingKey, reviewDetailsKeyById, reviewKeyById, weatherKeyById } from './../utils/keys.js';
+import { cuisineKey, cuisinesKey, restaurantCuisinesKeyById, restaurantDetailsKeyById, restaurantsByRatingKey, reviewDetailsKeyById, reviewKeyById, weatherKeyById } from './../utils/keys.js';
 import express, { type NextFunction, type Request, type Response } from "express"
 import { validate } from "../middlewares/validate.js"
-import { RestaurantSchema, type Restaurant } from "../schemas/restaurant.js"
+import { RestaurantDetailsSchema, RestaurantSchema, type Restaurant, type RestaurantDetails } from "../schemas/restaurant.js"
 import { initializeRedisClient } from "../utils/client.js"
 import { nanoid } from "nanoid"
 import { restaurantKeyById } from "../utils/keys.js"
@@ -11,20 +11,57 @@ import { ReviewSchema, type Review } from "../schemas/review.js"
 
 const router = express.Router()
 
-router.get("/", async(req: Request, res: Response, next: NextFunction) => {
+router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     const { page = 1, limit = 10 } = req.query
-    const start = (Number(page) - 1)* Number(limit)
+    const start = (Number(page) - 1) * Number(limit)
     const end = start + Number(limit)
 
-  try {
+    try {
         const client = await initializeRedisClient()
         const restaurantsIds = await client.zRange(restaurantsByRatingKey, start, end, { REV: true })
         const restaurants = await Promise.all(restaurantsIds.map(id => client.hGetAll(restaurantKeyById(id))))
         return successResponse(res, restaurants)
-    } catch(error) {
+    } catch (error) {
         next(error)
     }
 })
+
+router.post(
+    "/:restaurantId/details",
+    checkRestaurantExists,
+    validate(RestaurantDetailsSchema),
+    async (req: Request<{ restaurantId: string }>, res: Response, next: NextFunction) => {
+        const { restaurantId } = req.params
+        const data = req.body as RestaurantDetails
+
+        try {
+            const client = await initializeRedisClient()
+            const restaurantDetailsKey = restaurantDetailsKeyById(restaurantId)
+            await client.json.set(restaurantDetailsKey, ".", data)
+            return successResponse(res, {}, "Restaurant Details Added")
+        } catch (error) {
+            next(error)
+        }
+
+    })
+
+router.get(
+    "/:restaurantId/details",
+    checkRestaurantExists,
+    async (req: Request<{ restaurantId: string }>, res: Response, next: NextFunction) => {
+        const { restaurantId } = req.params
+        const data = req.body as RestaurantDetails
+
+        try {
+            const client = await initializeRedisClient()
+            const restaurantDetailsKey = restaurantDetailsKeyById(restaurantId)
+            const details = await client.json.get(restaurantDetailsKey)
+            return successResponse(res, details)
+        } catch (error) {
+            next(error)
+        }
+
+    })
 
 router.post("/", validate(RestaurantSchema), async (req, res, next) => {
     const data = req.body as Restaurant
@@ -33,7 +70,7 @@ router.post("/", validate(RestaurantSchema), async (req, res, next) => {
         const id = nanoid()
         const restaurantKey = restaurantKeyById(id)
         const hashData = { id, name: data.name, location: data.location }
-         await Promise.all([
+        await Promise.all([
             ...data.cuisines.map(cuisine => Promise.all([
                 client.sAdd(cuisinesKey, cuisine),
                 client.sAdd(cuisineKey(cuisine), id),
@@ -52,7 +89,7 @@ router.post("/", validate(RestaurantSchema), async (req, res, next) => {
     }
 })
 
-router.get("/:restaurantId/weather", checkRestaurantExists, async(req: Request< { restaurantId: string } >, res: Response, next: NextFunction) => {
+router.get("/:restaurantId/weather", checkRestaurantExists, async (req: Request<{ restaurantId: string }>, res: Response, next: NextFunction) => {
     const { restaurantId } = req.params
 
     try {
@@ -76,7 +113,7 @@ router.get("/:restaurantId/weather", checkRestaurantExists, async(req: Request< 
         const [lng, lat] = coords.split(",")
         const apiResponse = await fetch(`https://api.openweathermap.org/data/2.5/weather?units=imperial&lat=${lat}&lon=${lng}&appid=${process.env.WEATHER_API_KEY}`)
 
-        if(apiResponse.status === 200) {
+        if (apiResponse.status === 200) {
             const json = await apiResponse.json()
 
             await client.set(weatherKey, JSON.stringify(json), {
@@ -88,16 +125,16 @@ router.get("/:restaurantId/weather", checkRestaurantExists, async(req: Request< 
 
         return errorResponse(res, 500, "Could not fecth weather info")
 
-    } catch(error) {
+    } catch (error) {
         next(error)
     }
 })
 
 router.post(
-    "/:restaurantId/reviews", 
-    checkRestaurantExists, 
-    validate(ReviewSchema), 
-    async(req: Request< { restaurantId: string } >, res: Response, next: NextFunction) => {
+    "/:restaurantId/reviews",
+    checkRestaurantExists,
+    validate(ReviewSchema),
+    async (req: Request<{ restaurantId: string }>, res: Response, next: NextFunction) => {
         const { restaurantId } = req.params
         const data = req.body as Review
         try {
@@ -129,11 +166,11 @@ router.post(
     })
 
 router.get(
-    "/:restaurantId/reviews", 
-    checkRestaurantExists, 
-    async(req: Request< { restaurantId: string } >, res: Response, next: NextFunction) => {
+    "/:restaurantId/reviews",
+    checkRestaurantExists,
+    async (req: Request<{ restaurantId: string }>, res: Response, next: NextFunction) => {
         const { restaurantId } = req.params
-        const  { page = 1, limit = 10 } = req.query
+        const { page = 1, limit = 10 } = req.query
 
         const start = (Number(page) - 1) * Number(limit)
         const end = start + Number(limit) - 1
@@ -147,12 +184,12 @@ router.get(
         } catch (error) {
             next(error)
         }
-})
+    })
 
 router.delete(
-    "/:restaurantId/reviews/:reviewId", 
-    checkRestaurantExists, 
-    async(req: Request<{ restaurantId: string, reviewId: string }>, res: Response, next: NextFunction) => {
+    "/:restaurantId/reviews/:reviewId",
+    checkRestaurantExists,
+    async (req: Request<{ restaurantId: string, reviewId: string }>, res: Response, next: NextFunction) => {
         const { restaurantId, reviewId } = req.params
 
         try {
@@ -160,13 +197,13 @@ router.delete(
             const reviewKey = reviewKeyById(restaurantId)
             const reviewDetailsKey = reviewDetailsKeyById(reviewId)
 
-            const [ removeResult, deleteResult ] = await Promise.all([
+            const [removeResult, deleteResult] = await Promise.all([
                 client.lRem(reviewKey, 0, reviewId),
                 client.del(reviewDetailsKey)
             ])
 
             if (removeResult === 0 && deleteResult === 0) {
-                return  errorResponse(res, 404, "Review Not Found")
+                return errorResponse(res, 404, "Review Not Found")
             }
 
             return successResponse(res, reviewId, "Review deleted")
@@ -174,7 +211,7 @@ router.delete(
         } catch (error) {
             next(error)
         }
-})
+    })
 
 router.get("/:restaurantId", checkRestaurantExists, async (req: Request<{ restaurantId: string }>, res: Response, next: NextFunction) => {
     const { restaurantId } = req.params
@@ -184,12 +221,12 @@ router.get("/:restaurantId", checkRestaurantExists, async (req: Request<{ restau
         const [viewCount, restaurant, cuisines] =
             await Promise.all(
                 [
-                    client.hIncrBy(restaurantKey, "viewCount", 1), 
+                    client.hIncrBy(restaurantKey, "viewCount", 1),
                     client.hGetAll(restaurantKey),
                     client.sMembers(restaurantCuisinesKeyById(restaurantId))
                 ]
             )
-        return successResponse(res, {...restaurant, cuisines})
+        return successResponse(res, { ...restaurant, cuisines })
     } catch (error) {
         next(error)
     }
