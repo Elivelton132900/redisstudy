@@ -1,4 +1,4 @@
-import { cuisineKey, cuisinesKey, restaurantCuisinesKeyById, restaurantDetailsKeyById, restaurantsByRatingKey, reviewDetailsKeyById, reviewKeyById, weatherKeyById } from './../utils/keys.js';
+import { cuisineKey, cuisinesKey, indexKey, restaurantCuisinesKeyById, restaurantDetailsKeyById, restaurantsByRatingKey, reviewDetailsKeyById, reviewKeyById, weatherKeyById } from './../utils/keys.js';
 import express, { type NextFunction, type Request, type Response } from "express"
 import { validate } from "../middlewares/validate.js"
 import { RestaurantDetailsSchema, RestaurantSchema, type Restaurant, type RestaurantDetails } from "../schemas/restaurant.js"
@@ -23,6 +23,18 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
         return successResponse(res, restaurants)
     } catch (error) {
         next(error)
+    }
+})
+
+router.get("/search", async(req: Request, res: Response, next: NextFunction) => {
+    const { q } = req.query
+
+    try {
+        const client = await initializeRedisClient()
+        const results = await client.ft.search(indexKey, `@name: ${q}`)
+        return successResponse(res, results)
+    } catch(err) {
+        next(err)
     }
 })
 
