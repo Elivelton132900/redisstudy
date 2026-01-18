@@ -1,4 +1,4 @@
-import { cuisineKey, cuisinesKey, indexKey, restaurantCuisinesKeyById, restaurantDetailsKeyById, restaurantsByRatingKey, reviewDetailsKeyById, reviewKeyById, weatherKeyById } from './../utils/keys.js';
+import { bloomKey, cuisineKey, cuisinesKey, indexKey, restaurantCuisinesKeyById, restaurantDetailsKeyById, restaurantsByRatingKey, reviewDetailsKeyById, reviewKeyById, weatherKeyById } from './../utils/keys.js';
 import express, { type NextFunction, type Request, type Response } from "express"
 import { validate } from "../middlewares/validate.js"
 import { RestaurantDetailsSchema, RestaurantSchema, type Restaurant, type RestaurantDetails } from "../schemas/restaurant.js"
@@ -80,6 +80,13 @@ router.post("/", validate(RestaurantSchema), async (req, res, next) => {
     try {
         const client = await initializeRedisClient()
         const id = nanoid()
+        const bloomString = `${data.name}:${data.location}`
+        const seenBefore = await client.bf.exists(bloomKey, bloomString)
+
+        if(seenBefore) {
+            return errorResponse(res, 409, "Restaurant already exists")
+        }
+
         const restaurantKey = restaurantKeyById(id)
         const hashData = { id, name: data.name, location: data.location }
         await Promise.all([
@@ -92,7 +99,8 @@ router.post("/", validate(RestaurantSchema), async (req, res, next) => {
             client.zAdd(restaurantsByRatingKey, {
                 score: 0,
                 value: id
-            })
+            }),
+            client.bf.add(bloomKey, bloomString)
         ])
 
         return successResponse(res, hashData, "Added new restaurant")
